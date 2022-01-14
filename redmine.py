@@ -2,11 +2,10 @@ import datetime
 import time
 import os
 from sys import exit
-
-import redminelib.exceptions
 from prometheus_client import start_http_server, Summary
 from prometheus_client.core import GaugeMetricFamily, REGISTRY
 from redminelib import Redmine
+from redminelib.exceptions import ResourceAttrError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,8 +14,7 @@ COLLECTION_TIME = Summary('redmine_collector_collect_seconds', 'Time spent to co
 
 
 class RedmineCollector(object):
-    # The build apimetrics we want to export about.
-    apimetrics = ["redmine_issue_open"]
+    apimetrics = ["redmine_project_last7days_count"]
 
     def __init__(self, target, api):
         self._target = target.rstrip("/")
@@ -42,21 +40,24 @@ class RedmineCollector(object):
         _date = datetime.datetime.now()
         _datetimestamp = time.mktime(_date.timetuple())
 
-        for issue in redmine.issue.all(status_id='open'):
-            try:
-                self._prometheus_metrics['total_open_issues'].add_metric([issue.project.name, str(issue.id), issue.status.name, issue.tracker.name, issue.priority.name, issue.author.name, issue.assigned_to.name], _datetimestamp)
-            except redminelib.exceptions.ResourceAttrError:
-                self._prometheus_metrics['total_open_issues'].add_metric([issue.project.name, str(issue.id), "None", "None", "None", "None", "None"], _datetimestamp)
+        week = []
+        for i in range(0, 7):
+            week.append(((datetime.datetime.now() - datetime.timedelta(days=i)).date()))
 
+        for day in week:
+            time_entries = redmine.time_entry.filter(spent_on=day)
+            for entry in time_entries:
+                try:
+                    self._prometheus_metrics['spent7days'].add_metric([entry.project.name, str(entry.issue.id), str(entry.user.name), entry.activity.name, str(entry.hours), entry.spent_on.strftime('%d/%m/%Y')], str(entry.id))
+                except ResourceAttrError:
+                    self._prometheus_metrics['spent7days'].add_metric([entry.project.name, "None", str(entry.user.name), entry.activity.name, str(entry.hours), entry.spent_on.strftime('%d/%m/%Y')], str(entry.id))
 
     def _setup_empty_prometheus_metrics(self):
         # The metrics we want to export.
         self._prometheus_metrics = {}
-        self._prometheus_metrics['total_open_issues'] = GaugeMetricFamily('redmine_project_issue_due_date',
-                                                                'Redmine Project Total Issue Open',
-                                                                labels=["projectname", "issueid", "status", "tracker",
-                                                                        "priority", "author", "user"])
-
+        self._prometheus_metrics['spent7days'] = GaugeMetricFamily('redmine_project_issue_spenttime_last_week_hours',
+                                                                 'Redmine Project SpentTime Duration Hours Of Last Week',
+                                                                 labels=["project name", "issue", "user", "activity", "hours", "day"])
 
 def main():
     try:
