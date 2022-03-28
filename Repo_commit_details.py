@@ -3,7 +3,7 @@ from datetime import datetime
 
 repos = {}
 i =0
-g = Github('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')
+g = Github('Enter the token here')
 for repo in g.get_user().get_repos():
     master = repo.get_branch('master')
     sha_drpm = master.commit
